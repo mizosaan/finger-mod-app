@@ -83,7 +83,9 @@ const $ = (id) => document.getElementById(id);
 const dec = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 let payload = null;
-const loading = fetch('payload.json')
+// no-cache は「毎回サーバーに確かめてから使う」指定。これを付けないと、
+// ページを更新しても古い暗号文がブラウザのキャッシュから使われ続ける。
+const loading = fetch('payload.json', { cache: 'no-cache' })
   .then((r) => { if (!r.ok) throw new Error('payload.json を読めません'); return r.json(); })
   .then((j) => (payload = j));
 
