@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Finger Mod</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path fill='%2334e7e4' fill-rule='evenodd' d='M12.68 6.36L12.99 1.82L19.01 1.82L19.32 6.36L20.47 6.83L23.90 3.84L28.16 8.10L25.17 11.53L25.64 12.68L30.18 12.99L30.18 19.01L25.64 19.32L25.17 20.47L28.16 23.90L23.90 28.16L20.47 25.17L19.32 25.64L19.01 30.18L12.99 30.18L12.68 25.64L11.53 25.17L8.10 28.16L3.84 23.90L6.83 20.47L6.36 19.32L1.82 19.01L1.82 12.99L6.36 12.68L6.83 11.53L3.84 8.10L8.10 3.84L11.53 6.83Z M16 10.6a5.4 5.4 0 1 0 0 10.8 5.4 5.4 0 1 0 0-10.8Z'/></svg>">
+<style>
+  :root {
+    --ink: #14181a;
+    --ink-2: #667;
+    --line: #e3e6e6;
+    --bg: #f7f8f8;
+    --panel: #fff;
+    --accent: #14181a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 ui-sans-serif, -apple-system, "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    width: 100%;
+    max-width: 340px;
+    padding: 28px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05);
+  }
+  h1 { margin: 0 0 4px; font-size: 17px; letter-spacing: -.01em; }
+  p.sub { margin: 0 0 20px; color: var(--ink-2); font-size: 13px; }
+  label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+  input {
+    width: 100%; height: 40px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 9px;
+    background: #fbfcfc; color: var(--ink); font: inherit;
+  }
+  input:focus { outline: 2px solid #34e7e4; outline-offset: 1px; border-color: transparent; }
+  button {
+    width: 100%; height: 40px; margin-top: 12px;
+    border: 0; border-radius: 9px;
+    background: var(--accent); color: #fff;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  .msg { margin-top: 12px; min-height: 18px; font-size: 12.5px; color: #d63447; }
+  .msg.busy { color: var(--ink-2); }
+  iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #eef1f1; --ink-2: #98a2a2; --line: #2a3030; --bg: #14181a; --panel: #1b2022; --accent: #34e7e4; }
+    input { background: #171c1e; }
+    button { color: #08201f; }
+  }
+</style>
+</head>
+<body>
+
+<main class="card" id="card">
+  <h1>Finger Mod</h1>
+  <p class="sub">パスワードを入力してください</p>
+  <form id="form">
+    <label for="pw">パスワード</label>
+    <input id="pw" type="password" autocomplete="current-password" autofocus>
+    <button type="submit" id="go">開く</button>
+  </form>
+  <div class="msg" id="msg"></div>
+</main>
+
+<script>
+// ページ本体は payload.json に AES-GCM で暗号化して置いてある。ここでは
+// パスワードから PBKDF2 で鍵を作り、復号できたものを blob: の iframe として
+// 開く。鍵も平文もこのファイルには入っていないので、パスワードを知らなければ
+// 手に入るのは暗号文だけになる。
+const $ = (id) => document.getElementById(id);
+const dec = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+let payload = null;
+const loading = fetch('payload.json')
+  .then((r) => { if (!r.ok) throw new Error('payload.json を読めません'); return r.json(); })
+  .then((j) => (payload = j));
+
+async function open(password) {
+  await loading;
+  const material = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: dec(payload.salt), iterations: payload.iterations, hash: 'SHA-256' },
+    material, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  // 鍵が違えば GCM の認証タグが合わず、ここが例外になる = パスワードが違う。
+  const plain = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: dec(payload.iv) }, key, dec(payload.data));
+
+  const url = URL.createObjectURL(new Blob([plain], { type: 'text/html' }));
+  const frame = document.createElement('iframe');
+  frame.src = url;
+  // 同一オリジン扱いのままにする（WebGL と module script が要るため）。
+  document.body.replaceChildren(frame);
+  // 覚えておけば次回は素通りできる。保存するのはパスワードそのものではなく、
+  // このブラウザで復号に成功したという事実だけ。
+  try { sessionStorage.setItem('fm-pw', password); } catch {}
+}
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('msg'), go = $('go');
+  go.disabled = true;
+  msg.className = 'msg busy';
+  msg.textContent = '確認しています…';
+  try {
+    await open($('pw').value);
+  } catch (err) {
+    go.disabled = false;
+    msg.className = 'msg';
+    msg.textContent = String(err.message || err).includes('payload')
+      ? String(err.message) : 'パスワードが違います';
+    $('pw').select();
+  }
+});
+
+// 同じタブで一度開いていれば、そのまま入る。
+const saved = (() => { try { return sessionStorage.getItem('fm-pw'); } catch { return null; } })();
+if (saved) open(saved).catch(() => { try { sessionStorage.removeItem('fm-pw'); } catch {} });
+</script>
+
+</body>
+</html>
